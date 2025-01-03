@@ -1,0 +1,11 @@
+{
+    "api_port": 8080,
+    "mirror_directory": "/MIRROR",
+    "cache_db_path": "/var/cache/openimagemirror/cache.db",
+    "cache_expiry_time": 3600,
+    "scan_interval": 600,
+    "recursive_scan": true,
+    "enable_logging": true,
+    "log_file_path": "/var/log/openimagemirror.log",
+    "debug_mode": false
+}
