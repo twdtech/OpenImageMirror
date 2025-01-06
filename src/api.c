@@ -7,6 +7,9 @@
 #include <limits.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <errno.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 #define _XOPEN_SOURCE 500
 #include <libgen.h>
@@ -18,8 +21,22 @@
 #include "api.h"
 #include "config.h"
 #include "imgMgr.h"
+#include "logging.h"
 
 static struct MHD_Daemon *oim_api_server = NULL;
+static OIMConfig *global_config = NULL;
+
+static int is_safe_path(const char *path) {
+    if (strstr(path, "..") != NULL) {
+        return 0;
+    }
+    
+    if (path[0] == '/') {
+        return 0;
+    }
+    
+    return 1;
+}
 
 static char* oim_safe_basename(const char* path) {
     char* base = strrchr(path, '/');
@@ -61,10 +78,24 @@ enum MHD_Result oim_api_request_handler(
     size_t *upload_data_size __attribute__((unused)), 
     void **ptr __attribute__((unused))
 ) {
+    const union MHD_ConnectionInfo *conn_info = 
+    MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
+    
+    char client_ip[INET6_ADDRSTRLEN] = "Unknown";
+    if (conn_info && conn_info->client_addr) {
+        inet_ntop(conn_info->client_addr->sa_family, 
+                  conn_info->client_addr, 
+                  client_ip, 
+                  sizeof(client_ip));
+    }
+
     if (strcmp(url, "/api/mirror") == 0) {
+        LOG_INFO("Mirror list request from IP: %s", client_ip);
+
         json_object *mirror_list = oim_get_mirror_list();
         
         if (mirror_list == NULL) {
+            LOG_ERROR("Failed to retrieve mirror list for IP: %s", client_ip);
             return send_oim_json_response(connection, 
                 "{\"error\": \"Failed to retrieve mirror list\"}", 
                 MHD_HTTP_INTERNAL_SERVER_ERROR);
@@ -81,12 +112,33 @@ enum MHD_Result oim_api_request_handler(
 
     if (strncmp(url, "/download/", 10) == 0) {
         const char *file_path = url + 10;
+
+        LOG_INFO("Download request from IP: %s for file: %s", client_ip, file_path);
+
+        if (global_config == NULL) {
+            LOG_ERROR("Server configuration not loaded for download request from IP: %s", client_ip);
+            return send_oim_json_response(connection, 
+                "{\"error\": \"Server configuration not loaded\"}", 
+                MHD_HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        if (!is_safe_path(file_path)) {
+            LOG_WARN("Unsafe download path attempted from IP: %s, Path: %s", client_ip, file_path);
+            return send_oim_json_response(connection, 
+                "{\"error\": \"Invalid file path\"}", 
+                MHD_HTTP_BAD_REQUEST);
+        }
         
         char full_path[PATH_MAX];
-        snprintf(full_path, sizeof(full_path), "/Mirrors/%s", file_path);
+        snprintf(full_path, sizeof(full_path), "%s/%s", 
+                 global_config->mirror_directory,  
+                 file_path);
 
         int fd = open(full_path, O_RDONLY);
         if (fd == -1) {
+            LOG_ERROR("Failed to open file for download from IP: %s, File: %s, Error: %s", 
+                      client_ip, full_path, strerror(errno));
+            
             return send_oim_json_response(connection, 
                 "{\"error\": \"File not found\"}", 
                 MHD_HTTP_NOT_FOUND);
@@ -128,7 +180,9 @@ enum MHD_Result oim_api_request_handler(
         MHD_HTTP_NOT_FOUND);
 }
 
-struct MHD_Daemon *start_oim_api_server(OIMAPIServerConfig *config) {
+struct MHD_Daemon *start_oim_api_server(OIMAPIServerConfig *config, OIMConfig *oim_config) {
+    global_config = oim_config;
+
     if (oim_api_server != NULL) {
         fprintf(stderr, "API server already running\n");
         return oim_api_server;
@@ -157,6 +211,7 @@ void stop_oim_api_server(void) {
     if (oim_api_server != NULL) {
         MHD_stop_daemon(oim_api_server);
         oim_api_server = NULL;
+        global_config = NULL;
         printf("API server stopped\n");
     }
 }

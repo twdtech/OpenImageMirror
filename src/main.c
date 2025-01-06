@@ -86,7 +86,7 @@ int main(void) {
         .port = global_config->api_port
     };
 
-    global_daemon = start_oim_api_server(&api_config);
+    global_daemon = start_oim_api_server(&api_config, global_config);
     if (global_daemon == NULL) {
         LOG_ERROR("Failed to start API server");
         return 1;

@@ -4,6 +4,8 @@
 #include <microhttpd.h>
 #include <stdbool.h>
 
+#include "config.h"
+
 typedef enum MHD_Result (*OIMAPIRequestHandler)(
     void *cls, 
     struct MHD_Connection *connection, 
@@ -33,7 +35,10 @@ enum MHD_Result oim_api_request_handler(
 
 void stop_oim_api_server(void);
 
-struct MHD_Daemon *start_oim_api_server(OIMAPIServerConfig *config);
+struct MHD_Daemon *start_oim_api_server(
+    OIMAPIServerConfig *config, 
+    OIMConfig *oim_config
+);
 
 int send_oim_json_response(
     struct MHD_Connection *connection, 
